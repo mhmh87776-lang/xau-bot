@@ -1,47 +1,32 @@
-import os
-import requests
-import threading
+import os, threading, requests
 from flask import Flask
 from telegram import Update
-from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes
-
-TOKEN = os.environ.get("BOT_TOKEN")
-if not TOKEN:
-    raise RuntimeError("BOT_TOKEN not set")
-
-app = Flask(__name__)
-
-@app.route('/')
-def home():
-    return "Bot Live - OK"
-
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("✅ البوت شغال\nاكتب /gold")
-
-async def gold(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    try:
-        resp = requests.get("https://api.gold-api.com/price/XAU", timeout=15)
-        data = resp.json()
-        price = data.get('price', 0)
-        if price:
-            await update.message.reply_text(f"💰 سعر الذهب الآن:\n${price:.2f} للأونصة")
-        else:
-            await update.message.reply_text(f"رد الـ API: {data}")
-    except Exception as e:
-        await update.message.reply_text(f"❌ خطأ: {e}")
-
+from telegram.ext import Application, CommandHandler, ContextTypes
+TELEGRAM_TOKEN=os.environ.get("TELEGRAM_TOKEN","").strip()
+GOLD_API_KEY=os.environ.get("GOLD_API_KEY","").strip()
+app=Flask(__name__)
+@app.route("/")
+def home(): return "Bot is running!"
+def get_gold_price():
+ try:
+  if GOLD_API_KEY:
+   r=requests.get("https://www.goldapi.io/api/XAU/USD",headers={"x-access-token":GOLD_API_KEY},timeout=10)
+   if r.status_code==200 and r.json().get("price"): return float(r.json()["price"])
+  r=requests.get("https://api.gold-api.com/price/XAU",timeout=10)
+  return float(r.json().get("price",0)) if r.status_code==200 else None
+ except: return None
+async def gold_command(update,context):
+ price=get_gold_price()
+ if price: await update.message.reply_text(f"💰 سعر الذهب: ${price:,.2f} للأونصة")
+ else: await update.message.reply_text("❌ جرب بعد شوي")
+async def start_command(update,context): await update.message.reply_text("استخدم /gold")
 def run_bot():
-    print(">>> BOT STARTING...", flush=True)
-    bot_app = ApplicationBuilder().token(TOKEN).build()
-    bot_app.add_handler(CommandHandler("start", start))
-    bot_app.add_handler(CommandHandler("gold", gold))
-    bot_app.add_handler(CommandHandler("now", gold))
-    print(">>> BOT POLLING...", flush=True)
-    bot_app.run_polling(drop_pending_updates=True)
-
-# شغل البوت مع gunicorn
-threading.Thread(target=run_bot, daemon=True).start()
-
-if __name__ == "__main__":
-    port = int(os.environ.get("PORT", 10000))
-    app.run(host="0.0.0.0", port=port)
+ print(">>> BOT STARTING...",flush=True)
+ app_bot=Application.builder().token(TELEGRAM_TOKEN).build()
+ app_bot.add_handler(CommandHandler("gold",gold_command))
+ app_bot.add_handler(CommandHandler("start",start_command))
+ print(">>> BOT POLLING...",flush=True)
+ app_bot.run_polling(drop_pending_updates=True)
+if __name__=="__main__":
+ threading.Thread(target=run_bot,daemon=True).start()
+ app.run(host="0.0.0.0",port=int(os.environ.get("PORT",10000)))
