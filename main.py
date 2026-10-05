@@ -4,14 +4,13 @@ from telegram import Update
 from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes
 
 TOKEN = os.environ.get("BOT_TOKEN")
+if not TOKEN:
+    raise RuntimeError("BOT_TOKEN not set in Render!")
 
 app = Flask(__name__)
 @app.route('/')
 def home():
     return "Bot Live"
-
-def run_flask():
-    app.run(host='0.0.0.0', port=10000)
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("✅ شغال! اكتب /gold")
@@ -24,8 +23,7 @@ async def gold(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except Exception as e:
         await update.message.reply_text(f"خطأ: {e}")
 
-def main():
-    threading.Thread(target=run_flask, daemon=True).start()
+def run_bot():
     bot_app = ApplicationBuilder().token(TOKEN).build()
     bot_app.add_handler(CommandHandler("start", start))
     bot_app.add_handler(CommandHandler("gold", gold))
@@ -33,4 +31,8 @@ def main():
     bot_app.run_polling(drop_pending_updates=True)
 
 if __name__ == "__main__":
-    main()
+    # شغل البوت في الخلفية
+    threading.Thread(target=run_bot, daemon=False).start()
+    # شغل Flask في الواجهة عشان Render يشوفه
+    port = int(os.environ.get("PORT", 10000))
+    app.run(host='0.0.0.0', port=port)
