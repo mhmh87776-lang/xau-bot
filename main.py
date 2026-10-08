@@ -7,15 +7,9 @@ LAST_CHATS = set()
 LAST_SENT = {}
 
 def get_live_price():
-    # سعر لحظي حقيقي - يجرب مصدرين
     try:
         r = requests.get("https://api.gold-api.com/price/XAU", timeout=5).json()
         p = float(r.get("price",0))
-        if p>0: return p
-    except: pass
-    try:
-        r = requests.get("https://api.metals.live/v1/spot/gold", timeout=5).json()
-        p = float(r[0]) if isinstance(r,list) else float(r.get("price",0))
         if p>0: return p
     except: pass
     return 0
@@ -82,28 +76,37 @@ def analyze_tf(interval, label, live_price):
 
 def build_signal():
     live = get_live_price()
-    if live==0: live = None
+    if not live or live==0: return None
+    price = live
     tfs=[("5m","5 دقايق"),("15m","15 دقيقة"),("30m","30 دقيقة"),("60m","ساعة")]
     results=[]
     for interval,label in tfs:
         a=analyze_tf(interval,label, live)
         if a: results.append(a)
     if not results: return None
-    price = live or results[0]["price"]
     trades=[]
     for r in results:
         if r["score"]>=3:
-            # يرسل كل فرصة فوراً - يمنع بس التكرار نفس الفريم نفس الاتجاه خلال 60 ثانية
             key = f"{r['tf']}_{r['dir']}"
-            if key in LAST_SENT and time.time()-LAST_SENT[key] < 60:
-                continue
+            if key in LAST_SENT and time.time()-LAST_SENT[key] < 60: continue
             LAST_SENT[key]=time.time()
             if r["dir"]=="buy":
-                sl=r["sup"]; risk=price-sl or price*0.003; tp=price+2*risk
-                trades.append(f"🟢 {r['tf']} | BUY | قوة {r['score']}/6\n💰 دخول لحظي: ${price:.2f}\nوقف: ${sl:.2f}\nهدف: ${tp:.2f} (1:2)\nRSI:{r['rsi']} | {', '.join(r['details'])}")
+                # وقف صحيح: لازم يكون تحت الدخول
+                sl = r["sup"]
+                if sl >= price or sl==0: # لو الدعم فوق السعر (غلط Yahoo) صححه
+                    sl = price * 0.997 # 0.3% تحت
+                risk = price - sl
+                if risk < price*0.001: risk = price*0.003
+                tp = price + 2*risk
+                trades.append(f"🟢 {r['tf']} | BUY | قوة {r['score']}/6\n💰 دخول: ${price:.2f}\n🔴 وقف: ${sl:.2f} (تحت)\n🟢 هدف: ${tp:.2f} (1:2)\n{', '.join(r['details'])} RSI:{r['rsi']}")
             else:
-                sl=r["res"]; risk=sl-price or price*0.003; tp=price-2*risk
-                trades.append(f"🔴 {r['tf']} | SELL | قوة {r['score']}/6\n💰 دخول لحظي: ${price:.2f}\nوقف: ${sl:.2f}\nهدف: ${tp:.2f} (1:2)\nRSI:{r['rsi']} | {', '.join(r['details'])}")
+                sl = r["res"]
+                if sl <= price or sl==0:
+                    sl = price * 1.003 # 0.3% فوق
+                risk = sl - price
+                if risk < price*0.001: risk = price*0.003
+                tp = price - 2*risk
+                trades.append(f"🔴 {r['tf']} | SELL | قوة {r['score']}/6\n💰 دخول: ${price:.2f}\n🔴 وقف: ${sl:.2f} (فوق)\n🟢 هدف: ${tp:.2f} (1:2)\n{', '.join(r['details'])} RSI:{r['rsi']}")
     if not trades: return None
     header=f"🔥 فرصة فورية - {len(trades)} إشارات\n💰 السعر اللحظي: ${price:.2f}\n\n"
     return header + "\n\n".join(trades)
@@ -120,7 +123,8 @@ def auto_check():
         for cid in list(LAST_CHATS)[-20:]:
             send(cid, msg)
         return msg
-    return f"OK - Live - ${get_live_price():.2f} - No trade >=3 now"
+    live = get_live_price()
+    return f"OK - Live ${live:.2f} - No trade >=3"
 
 @app.route(f"/{TOKEN}", methods=["POST"])
 def webhook():
@@ -129,7 +133,7 @@ def webhook():
         chat_id=data["message"]["chat"]["id"]; LAST_CHATS.add(chat_id)
         txt=data["message"].get("text","")
         if "/start" in txt:
-            send(chat_id,"✅ V8.2 فوري - يرسل كل فرصة لحظياً\n/sniper - فحص الآن\n/gold - السعر اللحظي")
+            send(chat_id,"✅ V8.3 تم إصلاح الوقف والهدف\n/sniper - فحص الآن\n/gold - السعر اللحظي")
         elif "/gold" in txt:
             send(chat_id,f"💰 الذهب اللحظي: ${get_live_price():.2f}")
         elif "/sniper" in txt:
