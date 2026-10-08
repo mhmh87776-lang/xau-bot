@@ -1,39 +1,26 @@
-import os
-import time
-import threading
-import requests
-import yfinance as yf
-import pandas as pd
+import os, time, threading, requests, yfinance as yf, pandas as pd
 from flask import Flask
 
 app = Flask(__name__)
-
 TOKEN = os.getenv("TELEGRAM_TOKEN")
 CHAT_ID = os.getenv("CHAT_ID")
-
-last_signal = {"type": None, "price": 0, "time": 0}
 last_sent_time = 0
+last_price = 0
 
 def send_telegram(msg):
-    if not TOKEN or not CHAT_ID:
-        print("No token/chat_id")
-        return
+    if not TOKEN or not CHAT_ID: return
     try:
         url = f"https://api.telegram.org/bot{TOKEN}/sendMessage"
         requests.post(url, json={"chat_id": CHAT_ID, "text": msg, "parse_mode": "Markdown"}, timeout=10)
-        print("Sent:", msg[:50])
-    except Exception as e:
-        print("Send error", e)
+    except: pass
 
 def get_data():
     try:
-        # نجلب بيانات الذهب 5 دقايق
         data = yf.download("GC=F", period="2d", interval="5m", progress=False)
         if data.empty:
             data = yf.download("XAUUSD=X", period="2d", interval="5m", progress=False)
         return data
-    except Exception as e:
-        print(e)
+    except:
         return None
 
 def calc_rsi(series, period=14):
@@ -45,79 +32,84 @@ def calc_rsi(series, period=14):
     return rsi
 
 def check_strategies():
-    global last_signal, last_sent_time
+    global last_sent_time, last_price
     data = get_data()
-    if data is None or len(data) < 50:
-        return
-
-    # تسطيح الاعمدة
+    if data is None or len(data) < 50: return
     if isinstance(data.columns, pd.MultiIndex):
         data.columns = data.columns.get_level_values(0)
-    
     close = data['Close']
     high = data['High']
     low = data['Low']
     price = float(close.iloc[-1])
-    
     rsi_series = calc_rsi(close)
-    rsi = float(rsi_series.iloc[-1]) if not pd.isna(rsi_series.iloc[-1]) else 50
-
+    rsi_val = float(rsi_series.iloc[-1]) if not pd.isna(rsi_series.iloc[-1]) else 50
     recent_high = float(high.tail(20).max())
     recent_low = float(low.tail(20).min())
-    
-    # 1- BOS
-    bos_buy = price > recent_high - 1
-    bos_sell = price < recent_low + 1
-    
-    # 2- سيولة (سحب قمة/قاع)
-    last_candle_high = float(high.iloc[-2])
-    last_candle_low = float(low.iloc[-2])
-    liquidity_buy = last_candle_low < recent_low and price > recent_low  # كسر كاذب للقاع
-    liquidity_sell = last_candle_high > recent_high and price < recent_high
-
-    # 3- FVG (فجوة سعرية - شمعة كبيرة)
+    last_high = float(high.iloc[-2])
+    last_low = float(low.iloc[-2])
     prev_close = float(close.iloc[-2])
     prev_open = float(data['Open'].iloc[-2])
-    body_size = abs(prev_close - prev_open)
-    fvg_buy = body_size > 2.5 and prev_close > prev_open # شمعة صاعدة قوية
-    fvg_sell = body_size > 2.5 and prev_close < prev_open
+    body = abs(prev_close - prev_open)
 
-    # 4- Order Block (دعم/مقاومة)
-    ob_buy = price < recent_low + 3  # قريب من قاع
-    ob_sell = price > recent_high - 3 # قريب من قمة
+    bos_buy = price > recent_high - 1
+    bos_sell = price < recent_low + 1
+    liq_buy = last_low < recent_low and price > recent_low
+    liq_sell = last_high > recent_high and price < recent_high
+    fvg_buy = body > 2.5 and prev_close > prev_open
+    fvg_sell = body > 2.5 and prev_close < prev_open
+    ob_buy = price < recent_low + 3
+    ob_sell = price > recent_high - 3
+    rsi_buy = rsi_val < 35
+    rsi_sell = rsi_val > 65
 
-    # 5- RSI
-    rsi_buy = rsi < 35
-    rsi_sell = rsi > 65
-
-    # تجميع الاشارات
-    buy_score = sum([bos_buy, liquidity_buy, fvg_buy, ob_buy, rsi_buy])
-    sell_score = sum([bos_sell, liquidity_sell, fvg_sell, ob_sell, rsi_sell])
-
-    print(f"Price {price:.2f} RSI {rsi:.1f} Buy:{buy_score} Sell:{sell_score}")
+    buy_score = sum([bos_buy, liq_buy, fvg_buy, ob_buy, rsi_buy])
+    sell_score = sum([bos_sell, liq_sell, fvg_sell, ob_sell, rsi_sell])
 
     now = time.time()
-    # منع تكرار نفس السعر خلال 3 دقايق
-    if now - last_sent_time < 180 and abs(price - last_signal["price"]) < 2 and last_signal["type"] in ["BUY","SELL"]:
+    if now - last_sent_time < 180 and abs(price - last_price) < 2:
         return
 
     if buy_score >= 3:
-        reasons = []
-        if bos_buy: reasons.append("✅ BOS كسر قمة")
-        if liquidity_buy: reasons.append("✅ سحب سيولة من القاع")
-        if fvg_buy: reasons.append("✅ FVG شرائي")
-        if ob_buy: reasons.append("✅ Order Block دعم")
-        if rsi_buy: reasons.append(f"✅ RSI تشبع بيعي {rsi:.1f}")
+        reasons = ""
+        if bos_buy: reasons += "- BOS Buy\n"
+        if liq_buy: reasons += "- Liquidity Sweep Buy\n"
+        if fvg_buy: reasons += "- FVG Buy\n"
+        if ob_buy: reasons += "- Order Block Support\n"
+        if rsi_buy: reasons += f"- RSI Oversold {rsi_val:.1f}\n"
+        msg = f"BUY XAUUSD Gold\nPrice: {price:.2f}\nRSI: {rsi_val:.1f}\nScore: {buy_score}/5\n{reasons}\nEntry {price:.2f} SL {price-4:.2f} TP1 {price+3:.2f} TP2 {price+6:.2f}"
+        send_telegram(msg)
+        last_sent_time = now
+        last_price = price
 
-        msg = f"""🔥 **فرصة شراء ذهب حقيقية XAUUSD** 🔥
+    if sell_score >= 3:
+        reasons = ""
+        if bos_sell: reasons += "- BOS Sell\n"
+        if liq_sell: reasons += "- Liquidity Sweep Sell\n"
+        if fvg_sell: reasons += "- FVG Sell\n"
+        if ob_sell: reasons += "- Order Block Resistance\n"
+        if rsi_sell: reasons += f"- RSI Overbought {rsi_val:.1f}\n"
+        msg = f"SELL XAUUSD Gold\nPrice: {price:.2f}\nRSI: {rsi_val:.1f}\nScore: {sell_score}/5\n{reasons}\nEntry {price:.2f} SL {price+4:.2f} TP1 {price-3:.2f} TP2 {price-6:.2f}"
+        send_telegram(msg)
+        last_sent_time = now
+        last_price = price
 
-💰 السعر الحالي: `{price:.2f}`
-📊 RSI: {rsi:.1f}
+def loop():
+    while True:
+        try: check_strategies()
+        except: pass
+        time.sleep(60)
 
-**الأسباب ({buy_score}/5):**
-{chr(10).join(reasons)}
+@app.route("/")
+def home(): return "XAU Bot V2 Live - 5 Strategies"
 
-🎯 دخول: {price:.2f}
-⛔
+@app.route("/test")
+def test():
+    send_telegram("Test OK - Bot V2 with 5 strategies is working and will send every real opportunity")
+    return "sent"
+
+threading.Thread(target=loop, daemon=True).start()
+
+if __name__ == "__main__":
+    app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 10000)))
     
 
