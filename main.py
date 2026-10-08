@@ -84,16 +84,14 @@ def analyze():
 
 @app.route("/")
 def home(): 
-    return "Gold Sniper LIVE - go to /price and /check"
+    return "Gold Sniper LIVE - OK - use /price and /check"
 
 @app.route("/price")
-@app.route("/price/")
 def price_route():
     p=get_live_price()
     return {"price":p, "status":"live"}
 
 @app.route("/check")
-@app.route("/check/")
 def check_route():
     data=analyze()
     if not data: return {"error":"data fail"}
@@ -103,19 +101,20 @@ def check_route():
         for r in data['reasons'][:6]: msg+=f"• {r}\n"
         msg+=f"\n📍 مقاومة: ${data['res']:.2f} | دعم: ${data['sup']:.2f}\nRSI: {data['rsi']:.1f}"
         send_tg(msg)
-        return {"action":"SELL","price":price,"details":data}
+        return {"action":"SELL","price":price}
     elif data['buy']>=4:
         msg=f"🟢 *BUY GOLD - {data['buy']}/6*\n\n💰 دخول: ${price:.2f}\n🛑 وقف: ${price-4:.2f}\n🎯 هدف: ${price+8:.2f}\n\n"
         for r in data['reasons'][:6]: msg+=f"• {r}\n"
         msg+=f"\n📍 مقاومة: ${data['res']:.2f} | دعم: ${data['sup']:.2f}\nRSI: {data['rsi']:.1f}"
         send_tg(msg)
-        return {"action":"BUY","price":price,"details":data}
+        return {"action":"BUY","price":price}
     else:
         msg=f"⏳ *فحص ربع ساعة - لا فرصة قوية*\n\n💰 السعر: ${price:.2f}\nSELL: {data['sell']}/6 | BUY: {data['buy']}/6\nRSI: {data['rsi']:.1f}\nمقاومة: ${data['res']:.2f} | دعم: ${data['sup']:.2f}"
         send_tg(msg)
-        return {"action":"WAIT","price":price,"details":data}
+        return {"action":"WAIT","price":price}
 
 if __name__=="__main__":
-    app.run(host="0.0.0.0", port=10000)
+    port = int(os.environ.get("PORT", 10000))
+    app.run(host="0.0.0.0", port=port)
     
 
