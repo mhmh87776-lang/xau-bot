@@ -1,33 +1,44 @@
-import os, time, threading, requests, yfinance as yf, pandas as pd
+import os, time, threading, requests, yfinance as yf
 from flask import Flask
 
 app = Flask(__name__)
 TOKEN = os.getenv("TELEGRAM_TOKEN")
-CHAT_ID = os.getenv("CHAT_ID") or os.getenv("TELEGRAM_CHAT_ID") or os.getenv("TELEGRAM_CHATID")
-last_sent_time = 0
-last_price = 0
+CHAT_ID = os.getenv("CHAT_ID") or os.getenv("TELEGRAM_CHAT_ID")
 
-def send_telegram(msg):
-    if not TOKEN or not CHAT_ID:
-        print("Missing TOKEN or CHAT_ID")
-        return
+def send(msg):
     try:
         url = f"https://api.telegram.org/bot{TOKEN}/sendMessage"
-        r = requests.post(url, json={"chat_id": CHAT_ID, "text": msg, "parse_mode": "Markdown"}, timeout=10)
-        print(f"Telegram response: {r.text}")
-    except Exception as e:
-        print(f"Telegram error: {e}")
+        requests.post(url, json={"chat_id": CHAT_ID, "text": msg}, timeout=10)
+    except:
+        pass
 
-def get_data():
+def check():
     try:
-        data = yf.download("GC=F", period="2d", interval="5m", progress=False)
-        if data.empty:
-            data = yf.download("XAUUSD=X", period="2d", interval="5m", progress=False)
-        return data
-    except Exception as e:
-        print(f"Data error: {e}")
+        df = yf.download("GC=F", period="1d", interval="5m", progress=False)
+        price = float(df['Close'].iloc[-1])
+        return price
+    except:
         return None
 
-def calc_r
+def loop():
+    while True:
+        p = check()
+        if p:
+            print(f"price {p}")
+        time.sleep(60)
+
+@app.route("/")
+def home():
+    return "Bot Live"
+
+@app.route("/test")
+def test():
+    send("Test OK - Bot is working now!")
+    return "sent"
+
+threading.Thread(target=loop, daemon=True).start()
+
+if __name__ == "__main__":
+    app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 10000)))
     
 
