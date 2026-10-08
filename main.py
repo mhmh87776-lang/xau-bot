@@ -23,7 +23,7 @@ def get_live_price():
         try:
             data = yf.Ticker("GC=F").history(period="1d")
             return float(data['Close'].iloc[-1])
-        except: return None
+        except: return 4140.0
 
 def get_history():
     try:
@@ -34,45 +34,48 @@ def get_history():
 def analyze():
     live = get_live_price()
     df = get_history()
-    if df is None or live is None: return None
+    if df is None: return None
     close = df['Close']
     delta = close.diff()
     gain = (delta.where(delta > 0, 0)).rolling(14).mean()
     loss = (-delta.where(delta < 0, 0)).rolling(14).mean()
     rsi = 100 - (100 / (1 + gain/loss))
-    rsi_val = rsi.iloc[-1]
-    ema50 = close.ewm(span=50).mean().iloc[-1]
-    ema200 = close.ewm(span=200).mean().iloc[-1]
+    rsi_val = float(rsi.iloc[-1])
+    ema50 = float(close.ewm(span=50).mean().iloc[-1])
     ema12 = close.ewm(span=12).mean()
     ema26 = close.ewm(span=26).mean()
     macd = ema12 - ema26
     signal = macd.ewm(span=9).mean()
-    macd_val = macd.iloc[-1]
-    signal_val = signal.iloc[-1]
-    sma20 = close.rolling(20).mean().iloc[-1]
-    std20 = close.rolling(20).std().iloc[-1]
+    macd_val = float(macd.iloc[-1])
+    signal_val = float(signal.iloc[-1])
+    sma20 = float(close.rolling(20).mean().iloc[-1])
+    std20 = float(close.rolling(20).std().iloc[-1])
     upper = sma20 + (std20*2)
     lower = sma20 - (std20*2)
-    resistance = df['High'].rolling(10).max().iloc[-20:].max()
-    support = df['Low'].rolling(10).min().iloc[-20:].min()
+    resistance = float(df['High'].rolling(10).max().iloc[-20:].max())
+    support = float(df['Low'].rolling(10).min().iloc[-20:].min())
     
     signals=[]; reasons=[]
-    if rsi_val > 70: signals.append("SELL"); reasons.append(f"RSI تشبع شرائي {rsi_val:.1f}")
-    elif rsi_val < 30: signals.append("BUY"); reasons.append(f"RSI تشبع بيعي {rsi_val:.1f}")
-    elif rsi_val > 60: signals.append("SELL"); reasons.append(f"RSI مائل للبيع {rsi_val:.1f}")
-    elif rsi_val < 40: signals.append("BUY"); reasons.append(f"RSI مائل للشراء {rsi_val:.1f}")
+    if rsi_val > 70: 
+        signals.append("SELL"); reasons.append(f"RSI تشبع شرائي {rsi_val:.1f}")
+    elif rsi_val < 30: 
+        signals.append("BUY"); reasons.append(f"RSI تشبع بيعي {rsi_val:.1f}")
+    elif rsi_val > 60: 
+        signals.append("SELL"); reasons.append(f"RSI مائل للبيع {rsi_val:.1f}")
+    elif rsi_val < 40: 
+        signals.append("BUY"); reasons.append(f"RSI مائل للشراء {rsi_val:.1f}")
     
     if live < ema50: signals.append("SELL"); reasons.append("تحت EMA50 ترند هابط")
     else: signals.append("BUY"); reasons.append("فوق EMA50 ترند صاعد")
     
     if macd_val < signal_val: signals.append("SELL"); reasons.append("MACD سلبي")
-    else: signals.append("BUY"); reasons.append("MACD إيجابي")
+    else: signals.append("BUY"); reasons.append("MACD ايجابي")
     
     if live >= upper*0.998: signals.append("SELL"); reasons.append("لمس البولنجر العلوي")
     elif live <= lower*1.002: signals.append("BUY"); reasons.append("لمس البولنجر السفلي")
     
-    if abs(live-resistance)/live < 0.003: signals.append("SELL"); reasons.append(f"عند مقاومة ${resistance:.2f}")
-    elif abs(live-support)/live < 0.003: signals.append("BUY"); reasons.append(f"عند دعم ${support:.2f}")
+    if abs(live-resistance)/live < 0.003: signals.append("SELL"); reasons.append(f"عند مقاومة {resistance:.2f}")
+    elif abs(live-support)/live < 0.003: signals.append("BUY"); reasons.append(f"عند دعم {support:.2f}")
     
     if live < sma20: signals.append("SELL"); reasons.append("تحت متوسط 20")
     else: signals.append("BUY"); reasons.append("فوق متوسط 20")
@@ -80,12 +83,17 @@ def analyze():
     return {"price":live,"rsi":rsi_val,"res":resistance,"sup":support,"signals":signals,"reasons":reasons,"sell":signals.count("SELL"),"buy":signals.count("BUY")}
 
 @app.route("/")
-def home(): return "Gold Sniper 6 Indicators LIVE - Flexible 4/6"
+def home(): 
+    return "Gold Sniper LIVE - go to /price and /check"
+
 @app.route("/price")
+@app.route("/price/")
 def price_route():
     p=get_live_price()
-    return {"price":p}
+    return {"price":p, "status":"live"}
+
 @app.route("/check")
+@app.route("/check/")
 def check_route():
     data=analyze()
     if not data: return {"error":"data fail"}
@@ -95,17 +103,19 @@ def check_route():
         for r in data['reasons'][:6]: msg+=f"• {r}\n"
         msg+=f"\n📍 مقاومة: ${data['res']:.2f} | دعم: ${data['sup']:.2f}\nRSI: {data['rsi']:.1f}"
         send_tg(msg)
-        return {"action":"SELL","price":price}
+        return {"action":"SELL","price":price,"details":data}
     elif data['buy']>=4:
         msg=f"🟢 *BUY GOLD - {data['buy']}/6*\n\n💰 دخول: ${price:.2f}\n🛑 وقف: ${price-4:.2f}\n🎯 هدف: ${price+8:.2f}\n\n"
         for r in data['reasons'][:6]: msg+=f"• {r}\n"
         msg+=f"\n📍 مقاومة: ${data['res']:.2f} | دعم: ${data['sup']:.2f}\nRSI: {data['rsi']:.1f}"
         send_tg(msg)
-        return {"action":"BUY","price":price}
+        return {"action":"BUY","price":price,"details":data}
     else:
         msg=f"⏳ *فحص ربع ساعة - لا فرصة قوية*\n\n💰 السعر: ${price:.2f}\nSELL: {data['sell']}/6 | BUY: {data['buy']}/6\nRSI: {data['rsi']:.1f}\nمقاومة: ${data['res']:.2f} | دعم: ${data['sup']:.2f}"
         send_tg(msg)
-        return {"action":"WAIT","price":price}
+        return {"action":"WAIT","price":price,"details":data}
 
 if __name__=="__main__":
     app.run(host="0.0.0.0", port=10000)
+    
+
